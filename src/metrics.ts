@@ -237,14 +237,118 @@ export function countApplicantsRegistered(people: StreetRecord[], branchId: stri
 }
 
 // ---------------------------------------------------------------------------
+// Additional Operational & Pipeline Metrics (matching client report layout)
+// ---------------------------------------------------------------------------
+
+/** Properties dis-instructed / withdrawn in date range */
+export function countPropertiesWithdrawn(
+  properties: StreetRecord[],
+  branchId: string | null,
+  start: Date,
+  end: Date
+): number {
+  return properties.filter(p => {
+    if (!belongsToBranch(p, branchId)) return false;
+    const status = (getField(p, 'status') || '').toString().toLowerCase();
+    const isWithdrawn = status.includes('withdrawn') || status.includes('dis-instructed') || status.includes('cancelled');
+    if (!isWithdrawn) return false;
+    const date = parseDateField(p, 'status_updated_at') || parseDateField(p, 'updated_at') || parseDateField(p, 'created_at');
+    return date ? date >= start && date <= end : false;
+  }).length;
+}
+
+/** Active sales properties currently on market (For Sale snapshot) */
+export function countActiveForSale(properties: StreetRecord[], branchId: string | null): number {
+  return properties.filter(p => {
+    if (!belongsToBranch(p, branchId)) return false;
+    if (!truthy(p, 'is_sales')) return false;
+    const status = (getField(p, 'status') || '').toString().toLowerCase();
+    return status.includes('for sale') || status.includes('instructed') || status.includes('under offer') || status === 'available';
+  }).length;
+}
+
+/** Active sales currently in pipeline (agreed, under offer, or exchanged) */
+export function countSalesInProgress(sales: StreetRecord[], branchId: string | null): number {
+  return sales.filter(s => {
+    if (!belongsToBranch(s, branchId)) return false;
+    const status = (getField(s, 'status') || '').toString().toLowerCase();
+    return status.includes('offer accepted') || status.includes('under offer') || status.includes('exchanged') || status.includes('in progress');
+  }).length;
+}
+
+/** Total sales commission (£) for sales agreed or completed in period */
+export function calculateMonthlySalesCommission(
+  sales: StreetRecord[],
+  branchId: string | null,
+  start: Date,
+  end: Date
+): number {
+  let total = 0;
+  for (const s of sales) {
+    if (!belongsToBranch(s, branchId)) continue;
+    const date = parseDateField(s, 'dates.offer_accepted_date') || parseDateField(s, 'created_at') || parseDateField(s, 'status_updated_at');
+    if (date && date >= start && date <= end) {
+      const fee = Number(getField(s, 'fee_amount') || getField(s, 'fee') || 0);
+      if (fee > 0) {
+        total += fee;
+      } else {
+        const price = Number(getField(s, 'sale_price') || 0);
+        const feePct = Number(getField(s, 'fee_percentage') || 0.0125);
+        if (price > 0) total += Math.round(price * feePct);
+      }
+    }
+  }
+  return total;
+}
+
+/** Completions in date range */
+export function countCompletions(sales: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
+  return sales.filter(s => {
+    if (!belongsToBranch(s, branchId)) return false;
+    const status = (getField(s, 'status') || '').toString().toLowerCase();
+    if (!status.includes('completed')) return false;
+    const date = parseDateField(s, 'dates.completed_date') || parseDateField(s, 'status_updated_at') || parseDateField(s, 'updated_at');
+    return date ? date >= start && date <= end : false;
+  }).length;
+}
+
+/** Total viewings booked in date range */
+export function countViewingsBooked(viewings: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
+  return viewings.filter(v =>
+    belongsToBranch(v, branchId) &&
+    inRange(v, cfg.VIEWING_DATE_FIELD, start, end)
+  ).length;
+}
+
+/** Viewings cancelled in date range */
+export function countViewingsCancelled(viewings: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
+  return viewings.filter(v => {
+    if (!belongsToBranch(v, branchId)) return false;
+    const status = (getField(v, 'status') || '').toString().toLowerCase();
+    return status.includes('cancelled') && inRange(v, cfg.VIEWING_DATE_FIELD, start, end);
+  }).length;
+}
+
+/** Available lettings properties */
+export function countAvailableRentals(properties: StreetRecord[], branchId: string | null): number {
+  return properties.filter(p => {
+    if (!belongsToBranch(p, branchId)) return false;
+    if (!truthy(p, 'is_lettings')) return false;
+    const status = (getField(p, 'status') || '').toString().toLowerCase();
+    return status.includes('to let') || status.includes('instructed') || status === 'available';
+  }).length;
+}
+
+// ---------------------------------------------------------------------------
 // YoY helper (re-exported here so metrics.ts is self-contained for testing)
 // ---------------------------------------------------------------------------
 
 export function calculateYoY(current: number, previous: number): string {
   if (previous === 0) {
-    return current > 0 ? '+100%' : '0%';
+    return current > 0 ? "'+100%" : '0%';
   }
   const diff = ((current - previous) / previous) * 100;
   const prefix = diff > 0 ? '+' : '';
-  return `${prefix}${diff.toFixed(1)}%`;
+  return `'${prefix}${diff.toFixed(1)}%`;
 }
+

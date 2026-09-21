@@ -18,6 +18,40 @@ export interface DetailItem {
   statusOrFee: string;
 }
 
+export interface SalesOperationalMetrics {
+  mtdSalesCommission: string | number;
+  weekCompletions: number;
+  totalForSale: number;
+  mtdCompletions: number;
+  offersReceived: number;
+  salesInProgress: number | string;
+  weeklyFallThroughs: number;
+  weeklyWithdrawn: number;
+  mtdFallThroughs: number;
+  mtdWithdrawn: number;
+  weeklyApplicants: number;
+  weeklyViewingsBooked: number;
+  weeklyViewingsAttended: number;
+  weeklyViewingsCancelled: number;
+  mortgageReferrals: number;
+  conveyancingInstructions: number;
+  mtdMortgageReferrals: number;
+  mtdConveyancingInstructions: number;
+}
+
+export interface RentalsOperationalMetrics {
+  totalFullyManaged: number;
+  weeklyTotalIncome: string | number;
+  availableProperties: number;
+  mtdIncome: string | number;
+  weeklyLost: number;
+  mtdLost: number;
+  weeklyApplicants: number;
+  weeklyViewingsAttended: number;
+  mortgageReferrals: number;
+  inspectionsCompleted: number;
+}
+
 export class BranchReportBuilder {
   private sheets: sheets_v4.Sheets;
   private spreadsheetId: string;
@@ -75,6 +109,7 @@ export class BranchReportBuilder {
     weekEndingDate: string,
     weekNumber: number,
     kpiMetrics: BranchKpiSummary[],
+    operational: SalesOperationalMetrics,
     valuations: DetailItem[],
     instructions: DetailItem[],
     salesAgreed: DetailItem[]
@@ -88,13 +123,18 @@ export class BranchReportBuilder {
     });
 
     const rows: any[][] = [];
+    const headingRowIndices: number[] = [];
+    const tableHeaderRowIndices: number[] = [];
 
     // Header section
     rows.push(['Office', tabName, 'Date', weekEndingDate, 'Week No.', weekNumber]);
     rows.push([]);
 
     // KPI & YTD Performance Summary Table
+    headingRowIndices.push(rows.length);
     rows.push(['KEY PERFORMANCE INDICATORS (KPIs) & YTD COMPARISON']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push([
       'Metric',
       'This Week',
@@ -115,8 +155,33 @@ export class BranchReportBuilder {
       ]);
     }
 
+    // Weekly & Monthly Pipeline & Activity (Branch Report)
     rows.push([]);
+    headingRowIndices.push(rows.length);
+    rows.push(['WEEKLY & MONTHLY PIPELINE & ACTIVITY (BRANCH REPORT)']);
+
+    tableHeaderRowIndices.push(rows.length);
+    rows.push(['Operational Metric', 'Value', 'Pipeline & Activity Metric', 'Value']);
+    rows.push([
+      'MTD Sale Agreed Commission',
+      typeof operational.mtdSalesCommission === 'number' ? `£${operational.mtdSalesCommission.toLocaleString()}` : operational.mtdSalesCommission,
+      'Week Completions',
+      operational.weekCompletions,
+    ]);
+    rows.push(['Total Number For Sale', operational.totalForSale, 'MTD Completions', operational.mtdCompletions]);
+    rows.push(['Number Of Offers Received', operational.offersReceived, 'Sales In Progress (Pipeline)', operational.salesInProgress]);
+    rows.push(['Weekly Number Of Fall Throughs', operational.weeklyFallThroughs, 'Weekly Number Of Withdrawn (Dis-instructed)', operational.weeklyWithdrawn]);
+    rows.push(['MTD Fall Throughs', operational.mtdFallThroughs, 'MTD Withdrawn', operational.mtdWithdrawn]);
+    rows.push(['Number Of Applicants Registered (Week)', operational.weeklyApplicants, 'Number Of Viewings Booked (Week)', operational.weeklyViewingsBooked]);
+    rows.push(['Number Of Viewings Attended (Week)', operational.weeklyViewingsAttended, 'Number Of Viewings Cancelled (Week)', operational.weeklyViewingsCancelled]);
+    rows.push(['Mortgage Referrals (Week)', operational.mortgageReferrals, 'Conveyancing Instructions (Week)', operational.conveyancingInstructions]);
+    rows.push(['MTD Mortgage Referrals', operational.mtdMortgageReferrals, 'MTD Conveyancing Instructions', operational.mtdConveyancingInstructions]);
+
+    rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['MARKET VALUATIONS']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Value (£)', 'Property Type', 'Status']);
     if (valuations.length > 0) {
       for (const v of valuations) {
@@ -127,7 +192,10 @@ export class BranchReportBuilder {
     }
 
     rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['PROPERTY INSTRUCTIONS']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Asking Price (£)', 'Property Type', 'Fee (%/£)']);
     if (instructions.length > 0) {
       for (const inst of instructions) {
@@ -138,7 +206,10 @@ export class BranchReportBuilder {
     }
 
     rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['SALES AGREED']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Agreed Price (£)', 'Fee (£)', 'Fee (%)']);
     if (salesAgreed.length > 0) {
       for (const sa of salesAgreed) {
@@ -157,7 +228,7 @@ export class BranchReportBuilder {
     });
 
     // Apply header & section formatting
-    await this.applyReportFormatting(sheetId);
+    await this.applyReportFormatting(sheetId, headingRowIndices, tableHeaderRowIndices);
   }
 
   /**
@@ -168,6 +239,7 @@ export class BranchReportBuilder {
     weekEndingDate: string,
     weekNumber: number,
     kpiMetrics: BranchKpiSummary[],
+    operational: RentalsOperationalMetrics,
     valuations: DetailItem[],
     instructions: DetailItem[],
     letAgreed: DetailItem[]
@@ -181,13 +253,18 @@ export class BranchReportBuilder {
     });
 
     const rows: any[][] = [];
+    const headingRowIndices: number[] = [];
+    const tableHeaderRowIndices: number[] = [];
 
     // Header section
     rows.push(['Office', 'Lettings / Rentals', 'Date', weekEndingDate, 'Week No.', weekNumber]);
     rows.push([]);
 
     // KPI & YTD Performance Summary Table
+    headingRowIndices.push(rows.length);
     rows.push(['KEY PERFORMANCE INDICATORS (KPIs) & YTD COMPARISON']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push([
       'Metric',
       'This Week',
@@ -208,8 +285,44 @@ export class BranchReportBuilder {
       ]);
     }
 
+    // Operational Summary
     rows.push([]);
+    headingRowIndices.push(rows.length);
+    rows.push(['LETTINGS OPERATIONS & REVENUE SUMMARY (BRANCH REPORT)']);
+
+    tableHeaderRowIndices.push(rows.length);
+    rows.push(['Operational Metric', 'Value', 'Activity & Revenue Metric', 'Value']);
+    rows.push([
+      'Total Number Fully Managed',
+      operational.totalFullyManaged,
+      'Weekly Total Income',
+      typeof operational.weeklyTotalIncome === 'number' ? `£${operational.weeklyTotalIncome.toLocaleString()}` : operational.weeklyTotalIncome,
+    ]);
+    rows.push([
+      'Available Properties To Let',
+      operational.availableProperties,
+      'MTD Income',
+      typeof operational.mtdIncome === 'number' ? `£${operational.mtdIncome.toLocaleString()}` : operational.mtdIncome,
+    ]);
+    rows.push(['Weekly Number Lost', operational.weeklyLost, 'MTD Lost', operational.mtdLost]);
+    rows.push([
+      'Number Of Applicants/Enquiries (Week)',
+      operational.weeklyApplicants,
+      'Number Of Viewings Attended (Week)',
+      operational.weeklyViewingsAttended,
+    ]);
+    rows.push([
+      'Mortgage Referrals (Week)',
+      operational.mortgageReferrals,
+      'Property Inspections Completed',
+      operational.inspectionsCompleted,
+    ]);
+
+    rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['MARKET VALUATIONS']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Valuation Address', 'Rent PCM (£)', 'Property Type', 'Status']);
     if (valuations.length > 0) {
       for (const v of valuations) {
@@ -220,7 +333,10 @@ export class BranchReportBuilder {
     }
 
     rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['NEW PROPERTY INSTRUCTIONS']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Service Type', 'Monthly Fee (%/£)', 'Setup Fee (£)']);
     if (instructions.length > 0) {
       for (const inst of instructions) {
@@ -231,7 +347,10 @@ export class BranchReportBuilder {
     }
 
     rows.push([]);
+    headingRowIndices.push(rows.length);
     rows.push(['LET AGREED']);
+
+    tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Service Type', 'Monthly Fee (%/£)', 'Setup Fee (£)']);
     if (letAgreed.length > 0) {
       for (const la of letAgreed) {
@@ -250,58 +369,144 @@ export class BranchReportBuilder {
     });
 
     // Apply header & section formatting
-    await this.applyReportFormatting(sheetId);
+    await this.applyReportFormatting(sheetId, headingRowIndices, tableHeaderRowIndices);
   }
 
   /**
    * Applies professional styling to the Google Sheet tab.
+   * Highlights all table headers with a dark background and bold white text.
+   * Makes all section headings bold.
    */
-  private async applyReportFormatting(sheetId: number): Promise<void> {
+  private async applyReportFormatting(
+    sheetId: number,
+    headingRowIndices: number[],
+    tableHeaderRowIndices: number[]
+  ): Promise<void> {
     try {
+      const requests: sheets_v4.Schema$Request[] = [
+        // Unmerge all existing merged cells to prevent overlap errors on re-run
+        {
+          unmergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 150,
+              startColumnIndex: 0,
+              endColumnIndex: 10,
+            },
+          },
+        },
+        // Bold row 1 (Office, Date, Week No) with clean header background
+        {
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: 0,
+              endRowIndex: 1,
+              startColumnIndex: 0,
+              endColumnIndex: 6,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true },
+                backgroundColor: { red: 0.92, green: 0.95, blue: 0.98 },
+              },
+            },
+            fields: 'userEnteredFormat(textFormat,backgroundColor)',
+          },
+        },
+      ];
+
+      // Format all Section Headings (Just Bold text, NO dark background, merged across columns A to G)
+      for (const hIdx of headingRowIndices) {
+        requests.push({
+          mergeCells: {
+            range: {
+              sheetId,
+              startRowIndex: hIdx,
+              endRowIndex: hIdx + 1,
+              startColumnIndex: 0,
+              endColumnIndex: 6,
+            },
+            mergeType: 'MERGE_ALL',
+          },
+        });
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: hIdx,
+              endRowIndex: hIdx + 1,
+              startColumnIndex: 0,
+              endColumnIndex: 6,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, foregroundColor: { red: 0, green: 0, blue: 0 }, fontSize: 11 },
+                backgroundColor: { red: 1, green: 1, blue: 1 }, // Clean white / no dark background
+              },
+            },
+            fields: 'userEnteredFormat(textFormat,backgroundColor)',
+          },
+        });
+      }
+
+      // Format ALL Table Headers (Dark Gray background with bold white text)
+      for (const thIdx of tableHeaderRowIndices) {
+        requests.push({
+          repeatCell: {
+            range: {
+              sheetId,
+              startRowIndex: thIdx,
+              endRowIndex: thIdx + 1,
+              startColumnIndex: 0,
+              endColumnIndex: 6,
+            },
+            cell: {
+              userEnteredFormat: {
+                textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
+                backgroundColor: { red: 0.25, green: 0.25, blue: 0.25 }, // Dark Gray (#404040)
+              },
+            },
+            fields: 'userEnteredFormat(textFormat,backgroundColor)',
+          },
+        });
+      }
+
+      // Right-align data columns B through F in the KPI table (rows 4 to 16)
+      requests.push({
+        repeatCell: {
+          range: {
+            sheetId,
+            startRowIndex: 4,
+            endRowIndex: 16,
+            startColumnIndex: 1,
+            endColumnIndex: 6,
+          },
+          cell: {
+            userEnteredFormat: {
+              horizontalAlignment: 'RIGHT',
+            },
+          },
+          fields: 'userEnteredFormat(horizontalAlignment)',
+        },
+      });
+
+      // Auto-resize all columns (A through G) according to cell content!
+      requests.push({
+        autoResizeDimensions: {
+          dimensions: {
+            sheetId,
+            dimension: 'COLUMNS',
+            startIndex: 0,
+            endIndex: 7,
+          },
+        },
+      });
+
       await this.sheets.spreadsheets.batchUpdate({
         spreadsheetId: this.spreadsheetId,
-        requestBody: {
-          requests: [
-            // Bold row 1 (Office, Date, Week No)
-            {
-              repeatCell: {
-                range: {
-                  sheetId,
-                  startRowIndex: 0,
-                  endRowIndex: 1,
-                  startColumnIndex: 0,
-                  endColumnIndex: 6,
-                },
-                cell: {
-                  userEnteredFormat: {
-                    textFormat: { bold: true },
-                    backgroundColor: { red: 0.93, green: 0.95, blue: 0.98 },
-                  },
-                },
-                fields: 'userEnteredFormat(textFormat,backgroundColor)',
-              },
-            },
-            // Format KPI Table Header (Row 4: index 3)
-            {
-              repeatCell: {
-                range: {
-                  sheetId,
-                  startRowIndex: 3,
-                  endRowIndex: 4,
-                  startColumnIndex: 0,
-                  endColumnIndex: 6,
-                },
-                cell: {
-                  userEnteredFormat: {
-                    textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } },
-                    backgroundColor: { red: 0.16, green: 0.24, blue: 0.31 },
-                  },
-                },
-                fields: 'userEnteredFormat(textFormat,backgroundColor)',
-              },
-            },
-          ],
-        },
+        requestBody: { requests },
       });
     } catch (e: any) {
       console.warn(`Formatting note: ${e.message}`);
@@ -325,9 +530,9 @@ export function getIsoWeek(date: Date): number {
  */
 export function calculateYoY(current: number, previous: number): string {
   if (previous === 0) {
-    return current > 0 ? '+100%' : '0%';
+    return current > 0 ? "'+100%" : '0%';
   }
   const diff = ((current - previous) / previous) * 100;
   const prefix = diff > 0 ? '+' : '';
-  return `${prefix}${diff.toFixed(1)}%`;
+  return `'${prefix}${diff.toFixed(1)}%`;
 }
