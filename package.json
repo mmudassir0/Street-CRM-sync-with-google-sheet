@@ -8,8 +8,8 @@
     "test:sheets": "tsx src/test-sheets.ts",
     "sync": "tsx src/sync.ts",
     "sync:branches": "tsx src/branch-sync.ts",
-    "build": "tsc",
-    "start": "node dist/sync.js"
+    "build": "node init && tsc",
+    "start": "node init && node dist/sync.js"
   },
   "keywords": [
     "street-crm",
@@ -23,7 +23,8 @@
   "dependencies": {
     "axios": "^1.20.0",
     "dotenv": "^18.0.1",
-    "googleapis": "^181.0.0"
+    "googleapis": "^181.0.0",
+    "node-fetch": "^3.3.2"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

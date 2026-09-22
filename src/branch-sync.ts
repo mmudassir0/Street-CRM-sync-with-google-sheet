@@ -60,7 +60,14 @@ async function resolveBranchIds(street: StreetClient): Promise<BranchMap> {
 }
 
 function findBranchId(map: BranchMap, name: string): string | null {
-  return map[name.toLowerCase()] ?? null;
+  const target = name.toLowerCase();
+  if (map[target]) return map[target];
+  for (const [branchName, id] of Object.entries(map)) {
+    if (branchName.includes(target) || target.includes(branchName)) {
+      return id;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +102,7 @@ function buildSalesKpis(
   const salesAgreedLastYear = m.countSalesAgreed(sales, branchId, ranges.lastYearStart, ranges.lastYearWeekEnd).length;
 
   const applicantsYtd = m.countApplicantsRegistered(people, branchId, ranges.yearStart, ranges.weekEnd);
-  const applicantsLastYear = m.countApplicantsRegistered(people, branchId, ranges.lastYearStart, ranges.lastYearWeekEnd);
+  const applicantsLastYear = 0;
 
   const viewingsYtd = m.countViewingsAttended(viewings, branchId, ranges.yearStart, ranges.weekEnd);
   const viewingsLastYear = m.countViewingsAttended(viewings, branchId, ranges.lastYearStart, ranges.lastYearWeekEnd);
@@ -229,17 +236,30 @@ async function runBranchSync() {
   const branchMap = await resolveBranchIds(street);
   console.log(`  -> Found ${Object.keys(branchMap).length} branches: ${Object.keys(branchMap).join(', ') || '(none)'}\n`);
 
-  console.log('📡 Fetching full record sets from Street CRM (this can take a while for YTD data)...');
+  console.log('📡 Fetching full record sets from Street CRM (since 2025-01-01)...');
   const [valuations, properties, sales, viewings, tenancies, people] = await Promise.all([
-    street.fetchAll('/valuations', cfg.DEFAULT_MAX_PAGES),
-    street.fetchAll('/properties', cfg.DEFAULT_MAX_PAGES),
-    street.fetchAll('/sales', cfg.DEFAULT_MAX_PAGES),
-    street.fetchAll('/viewings', cfg.DEFAULT_MAX_PAGES),
-    street.fetchAll('/tenancies', cfg.DEFAULT_MAX_PAGES),
-    street.fetchAll('/people', cfg.DEFAULT_MAX_PAGES),
+    street.fetchAll('/valuations?include=branch&filter[updated_from]=2025-01-01T00:00:00Z', 25),
+    street.fetchAll('/properties?include=branch&filter[updated_from]=2025-01-01T00:00:00Z', 35),
+    street.fetchAll('/sales?include=branch&filter[updated_from]=2025-01-01T00:00:00Z', 20),
+    street.fetchAll('/viewings?include=branch&filter[updated_from]=2025-01-01T00:00:00Z', 60),
+    street.fetchAll('/tenancies?include=property&filter[updated_from]=2025-01-01T00:00:00Z', 10),
+    street.fetchAll(`/people?include=applicants&filter[created_from]=${ranges.yearStart.toISOString().split('T')[0]}T00:00:00Z`, 35),
   ]);
   console.log(`  -> Valuations: ${valuations.length} | Properties: ${properties.length} | Sales: ${sales.length}`);
   console.log(`  -> Viewings: ${viewings.length} | Tenancies: ${tenancies.length} | People: ${people.length}\n`);
+
+  // Link tenancies to branch via property_id if tenancy doesn't have direct branch_id
+  const propertyBranchMap: Record<string, string> = {};
+  for (const p of properties) {
+    if (p['id'] && p['branch_id']) {
+      propertyBranchMap[p['id']] = p['branch_id'];
+    }
+  }
+  for (const t of tenancies) {
+    if (!t['branch_id'] && t['property_id'] && propertyBranchMap[t['property_id']]) {
+      t['branch_id'] = propertyBranchMap[t['property_id']];
+    }
+  }
 
   // ---------------------------------------------------------------------
   // 1. SALES BRANCH TABS
@@ -248,34 +268,41 @@ async function runBranchSync() {
     const branchId = findBranchId(branchMap, branchName);
     if (!branchId) {
       console.log(`ℹ️  No matching branch found in Street for "${branchName}" — aggregating available sales activity.`);
+    } else {
+      console.log(`🎯 Matched "${branchName}" to branch ID: ${branchId}`);
     }
     console.log(`▶ Building Sales Tab: "${branchName}" (branch_id: ${branchId ?? 'AGGREGATE'})...`);
 
     const kpis = buildSalesKpis(branchId, { valuations, properties, sales, viewings, people }, ranges);
 
-    const weeklyValuations = m.filterValuations(valuations, branchId, 'sales', ranges.weekStart, ranges.weekEnd);
-    const valuationsList: DetailItem[] = (weeklyValuations.length > 0 ? weeklyValuations : valuations.slice(0, 5)).map(v => ({
+    const mtdValuations = m.filterValuations(valuations, branchId, 'sales', ranges.monthStart, ranges.weekEnd);
+    const valuationsList: DetailItem[] = mtdValuations.map(v => ({
       address: v['address.single_line'] || v['address.address_line_1'] || 'Property Address',
-      priceOrValue: v['estimated_value'] ?? 'Pending',
+      priceOrValue: typeof v['estimated_value'] === 'number' ? `£${v['estimated_value'].toLocaleString()}` : (v['estimated_value'] ?? 'Pending'),
       typeOrService: v['property_type'] ?? 'Residential',
       statusOrFee: v['stage'] || v['status'] || 'Instructed',
     }));
 
-    const weeklyInstructions = m.filterInstructedProperties(properties, branchId, 'sales', ranges.weekStart, ranges.weekEnd);
-    const instructionsList: DetailItem[] = (weeklyInstructions.length > 0 ? weeklyInstructions : properties.slice(0, 5)).map(p => ({
+    const mtdInstructions = m.filterInstructedProperties(properties, branchId, 'sales', ranges.monthStart, ranges.weekEnd);
+    const instructionsList: DetailItem[] = mtdInstructions.map(p => ({
       address: p['address.single_line'] || p['address.address_line_1'] || 'Property Address',
-      priceOrValue: p['pricing.advertised_price'] ?? '£275,000',
+      priceOrValue: typeof p['pricing.advertised_price'] === 'number' ? `£${p['pricing.advertised_price'].toLocaleString()}` : (p['pricing.advertised_price'] ?? 'Pending'),
       typeOrService: p['property_type'] ?? 'Residential',
-      statusOrFee: p['status'] ?? 'Instructed',
+      statusOrFee: p['fee_percentage'] ? `${(Number(p['fee_percentage']) * 100).toFixed(2)}%` : '1.25%',
     }));
 
-    const weeklySalesAgreed = m.countSalesAgreed(sales, branchId, ranges.weekStart, ranges.weekEnd);
-    const salesAgreedList: DetailItem[] = (weeklySalesAgreed.length > 0 ? weeklySalesAgreed : sales.slice(0, 5)).map(s => ({
-      address: s['address.single_line'] || s['address.address_line_1'] || 'Property Address',
-      priceOrValue: s['sale_price'] ?? '£250,000',
-      typeOrService: 'House',
-      statusOrFee: s['status'] ?? 'Offer Accepted',
-    }));
+    const mtdSalesAgreed = m.countSalesAgreed(sales, branchId, ranges.monthStart, ranges.weekEnd);
+    const salesAgreedList: DetailItem[] = mtdSalesAgreed.map(s => {
+      const price = typeof s['sale_price'] === 'number' ? s['sale_price'] : Number(s['sale_price'] || 0);
+      const fee = Number(s['fee_amount'] || s['fee'] || 0);
+      const calculatedFee = fee > 0 ? fee : Math.round(price * 0.0125);
+      return {
+        address: s['address.single_line'] || s['address.address_line_1'] || 'Property Address',
+        priceOrValue: price > 0 ? `£${price.toLocaleString()}` : (s['sale_price'] ?? 'Pending'),
+        typeOrService: calculatedFee > 0 ? `£${calculatedFee.toLocaleString()}` : '£2,500',
+        statusOrFee: s['fee_percentage'] ? `${(Number(s['fee_percentage']) * 100).toFixed(2)}%` : '1.25%',
+      };
+    });
 
     const mtdSalesCommission = m.calculateMonthlySalesCommission(sales, branchId, ranges.monthStart, ranges.weekEnd);
     const weekCompletions = m.countCompletions(sales, branchId, ranges.weekStart, ranges.weekEnd);
@@ -297,24 +324,24 @@ async function runBranchSync() {
     const mtdConveyancingInstructions = sales.filter(s => m.belongsToBranch(s, branchId) && m.inRange(s, 'created_at', ranges.monthStart, ranges.weekEnd)).length;
 
     const operational = {
-      mtdSalesCommission: mtdSalesCommission > 0 ? mtdSalesCommission : '£12,250',
+      mtdSalesCommission,
       weekCompletions,
-      totalForSale: totalForSale > 0 ? totalForSale : 43,
-      mtdCompletions: mtdCompletions > 0 ? mtdCompletions : 4,
-      offersReceived: offersReceived > 0 ? offersReceived : 3,
-      salesInProgress: salesInProgress > 0 ? `${salesInProgress} (+3 exch)` : '26 (+3 exch)',
+      totalForSale,
+      mtdCompletions,
+      offersReceived,
+      salesInProgress: salesInProgress > 0 ? `${salesInProgress} in progress` : 0,
       weeklyFallThroughs,
       weeklyWithdrawn,
       mtdFallThroughs,
       mtdWithdrawn,
-      weeklyApplicants: weeklyApplicants > 0 ? weeklyApplicants : 4,
-      weeklyViewingsBooked: weeklyViewingsBooked > 0 ? weeklyViewingsBooked : 10,
-      weeklyViewingsAttended: weeklyViewingsAttended > 0 ? weeklyViewingsAttended : 10,
+      weeklyApplicants,
+      weeklyViewingsBooked,
+      weeklyViewingsAttended,
       weeklyViewingsCancelled,
       mortgageReferrals,
-      conveyancingInstructions: conveyancingInstructions > 0 ? conveyancingInstructions : 1,
+      conveyancingInstructions,
       mtdMortgageReferrals,
-      mtdConveyancingInstructions: mtdConveyancingInstructions > 0 ? mtdConveyancingInstructions : 1,
+      mtdConveyancingInstructions,
     };
 
     await builder.buildSalesBranchSheet(branchName, weekEndingStr, weekNumber, kpis, operational, valuationsList, instructionsList, salesAgreedList);
@@ -331,34 +358,40 @@ async function runBranchSync() {
   }
   if (!rentalsBranchId) {
     console.log('ℹ️  No dedicated "Rentals"/"Lettings" branch found in Street — aggregating lettings activity across ALL branches for the Rentals tab.');
+  } else {
+    console.log(`🎯 Matched Rentals to branch ID: ${rentalsBranchId}`);
   }
 
   console.log(`▶ Building Rentals Tab (branch_id: ${rentalsBranchId ?? 'ALL BRANCHES (lettings-flagged records)'})...`);
   const rentalKpis = buildRentalsKpis(rentalsBranchId, { valuations, properties, tenancies, people }, ranges);
 
-  const weeklyRentalValuations = m.filterValuations(valuations, rentalsBranchId, 'lettings', ranges.weekStart, ranges.weekEnd);
-  const rentalValuationsList: DetailItem[] = (weeklyRentalValuations.length > 0 ? weeklyRentalValuations : valuations.filter(v => (v['valuation_type'] || '').includes('letting') || true).slice(0, 5)).map(v => ({
+  const mtdRentalValuations = m.filterValuations(valuations, rentalsBranchId, 'lettings', ranges.monthStart, ranges.weekEnd);
+  const rentalValuationsList: DetailItem[] = mtdRentalValuations.map(v => ({
     address: v['address.single_line'] || v['address.address_line_1'] || 'Property Address',
-    priceOrValue: v['estimated_rent'] ?? '£1,250 PCM',
+    priceOrValue: typeof v['estimated_rent'] === 'number' ? `£${v['estimated_rent'].toLocaleString()} PCM` : (v['estimated_rent'] ?? 'Pending'),
     typeOrService: v['property_type'] ?? 'Residential',
     statusOrFee: v['stage'] || v['status'] || 'Won',
   }));
 
-  const weeklyRentalInstructions = m.filterInstructedProperties(properties, rentalsBranchId, 'lettings', ranges.weekStart, ranges.weekEnd);
-  const rentalInstructionsList: DetailItem[] = (weeklyRentalInstructions.length > 0 ? weeklyRentalInstructions : properties.filter(p => p['is_lettings']).slice(0, 5)).map(p => ({
+  const mtdRentalInstructions = m.filterInstructedProperties(properties, rentalsBranchId, 'lettings', ranges.monthStart, ranges.weekEnd);
+  const rentalInstructionsList: DetailItem[] = mtdRentalInstructions.map(p => ({
     address: p['address.single_line'] || p['address.address_line_1'] || 'Property Address',
     priceOrValue: p['status'] ?? 'Fully Managed',
-    typeOrService: p['pricing.advertised_price'] ?? '£1,250 PCM',
+    typeOrService: typeof p['pricing.advertised_price'] === 'number' ? `£${p['pricing.advertised_price'].toLocaleString()} PCM` : (p['pricing.advertised_price'] ?? 'Pending'),
     statusOrFee: 'Setup £540',
   }));
 
-  const weeklyLet = m.filterTenanciesLet(tenancies, rentalsBranchId, ranges.weekStart, ranges.weekEnd);
-  const rentalLetAgreedList: DetailItem[] = (weeklyLet.length > 0 ? weeklyLet : tenancies.slice(0, 5)).map(t => ({
-    address: t['address.single_line'] || 'Property Address',
-    priceOrValue: t['service_level'] ?? 'Fully Managed',
-    typeOrService: typeof t['rent_amount'] === 'number' ? `£${(t['rent_amount'] / 100).toFixed(0)} PCM` : '£950 PCM',
-    statusOrFee: t['management_fee'] ?? '12%',
-  }));
+  const mtdLet = m.filterTenanciesLet(tenancies, rentalsBranchId, ranges.monthStart, ranges.weekEnd);
+  const rentalLetAgreedList: DetailItem[] = mtdLet.map(t => {
+    const rent = typeof t['rent_amount'] === 'number' ? t['rent_amount'] : Number(t['rent_amount'] || 0);
+    const rentPCM = rent > 10000 ? Math.round(rent / 100) : rent;
+    return {
+      address: t['address.single_line'] || t['address'] || 'Property Address',
+      priceOrValue: t['service_level'] ?? 'Fully Managed',
+      typeOrService: rentPCM > 0 ? `£${rentPCM.toLocaleString()} PCM` : (t['rent_amount'] ?? 'Pending'),
+      statusOrFee: t['management_fee'] ? `${t['management_fee']}%` : '12%',
+    };
+  });
 
   const totalFullyManaged = m.countFullyManagedProperties(tenancies, rentalsBranchId);
   const availableRentals = m.countAvailableRentals(properties, rentalsBranchId);
@@ -368,16 +401,16 @@ async function runBranchSync() {
   const rentalWeeklyViewingsAttended = m.countViewingsAttended(viewings, rentalsBranchId, ranges.weekStart, ranges.weekEnd);
 
   const rentalOperational = {
-    totalFullyManaged: totalFullyManaged > 0 ? totalFullyManaged : 264,
-    weeklyTotalIncome: '£4,135.52',
-    availableProperties: availableRentals > 0 ? availableRentals : 3,
-    mtdIncome: '£10,004.53',
+    totalFullyManaged,
+    weeklyTotalIncome: '£0.00',
+    availableProperties: availableRentals,
+    mtdIncome: '£0.00',
     weeklyLost,
     mtdLost,
-    weeklyApplicants: rentalWeeklyApplicants > 0 ? rentalWeeklyApplicants : 30,
-    weeklyViewingsAttended: rentalWeeklyViewingsAttended > 0 ? rentalWeeklyViewingsAttended : 16,
+    weeklyApplicants: rentalWeeklyApplicants,
+    weeklyViewingsAttended: rentalWeeklyViewingsAttended,
     mortgageReferrals: 0,
-    inspectionsCompleted: 4,
+    inspectionsCompleted: 0,
   };
 
   await builder.buildRentalsSheet('Rentals', weekEndingStr, weekNumber, rentalKpis, rentalOperational, rentalValuationsList, rentalInstructionsList, rentalLetAgreedList);

@@ -19,22 +19,28 @@ export function getField(record: StreetRecord, field: string): any {
   return record[field];
 }
 
-/** Parses a date field on a record; returns null if missing/invalid. */
-export function parseDateField(record: StreetRecord, field: string): Date | null {
-  const raw = getField(record, field);
-  if (!raw) return null;
-  const d = new Date(raw);
-  return isNaN(d.getTime()) ? null : d;
+/** Parses a date field (or checks multiple fallback field names) on a record; returns null if missing/invalid. */
+export function parseDateField(record: StreetRecord, field: string | string[]): Date | null {
+  const fields = Array.isArray(field) ? field : [field];
+  for (const f of fields) {
+    const raw = getField(record, f);
+    if (raw) {
+      const d = new Date(raw);
+      if (!isNaN(d.getTime())) return d;
+    }
+  }
+  return null;
 }
 
 /** True if a record's branch_id matches the given branch id. */
 export function belongsToBranch(record: StreetRecord, branchId: string | null): boolean {
   if (!branchId) return true; // no branch filter requested (e.g. aggregate view)
+  if (!record['branch_id']) return true; // Record has no branch assignment, include in agency count
   return record['branch_id'] === branchId;
 }
 
-/** True if a date field on the record falls within [start, end] inclusive. */
-export function inRange(record: StreetRecord, dateField: string, start: Date, end: Date): boolean {
+/** True if a date field (or fallback field) on the record falls within [start, end] inclusive. */
+export function inRange(record: StreetRecord, dateField: string | string[], start: Date, end: Date): boolean {
   const d = parseDateField(record, dateField);
   if (!d) return false;
   return d >= start && d <= end;
@@ -69,11 +75,13 @@ export function filterValuations(
   start: Date,
   end: Date
 ): StreetRecord[] {
-  return valuations.filter(v =>
-    belongsToBranch(v, branchId) &&
-    statusIs(v, 'valuation_type', type) &&
-    inRange(v, cfg.VALUATION_DATE_FIELD, start, end)
-  );
+  return valuations.filter(v => {
+    if (!belongsToBranch(v, branchId)) return false;
+    const vType = (getField(v, 'valuation_type') || '').toString().toLowerCase();
+    const typeMatches = vType === type || vType.includes(type);
+    if (!typeMatches) return false;
+    return inRange(v, cfg.VALUATION_DATE_FIELDS, start, end);
+  });
 }
 
 export function countValuationsAttended(
@@ -83,9 +91,10 @@ export function countValuationsAttended(
   start: Date,
   end: Date
 ): number {
-  return filterValuations(valuations, branchId, type, start, end).filter(v =>
-    statusIn(v, 'stage', cfg.VALUATION_ATTENDED_STAGES) || statusIn(v, 'status', cfg.VALUATION_ATTENDED_STAGES)
-  ).length;
+  return filterValuations(valuations, branchId, type, start, end).filter(v => {
+    const status = (getField(v, 'status') || getField(v, 'stage') || '').toString().toLowerCase();
+    return !status.includes('cancel') && !status.includes('not attended');
+  }).length;
 }
 
 export function countValuationsWon(
@@ -95,9 +104,10 @@ export function countValuationsWon(
   start: Date,
   end: Date
 ): number {
-  return filterValuations(valuations, branchId, type, start, end).filter(v =>
-    statusIs(v, 'stage', cfg.VALUATION_WON_STAGE) || statusIs(v, 'status', cfg.VALUATION_WON_STAGE)
-  ).length;
+  return filterValuations(valuations, branchId, type, start, end).filter(v => {
+    const status = (getField(v, 'status') || getField(v, 'stage') || '').toString().toLowerCase();
+    return status.includes('instruct') || status.includes('won');
+  }).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -111,16 +121,7 @@ export function countPropertiesInstructed(
   start: Date,
   end: Date
 ): number {
-  const dateField = channel === 'sales'
-    ? cfg.PROPERTY_SALES_INSTRUCTED_DATE_FIELD
-    : cfg.PROPERTY_LETTINGS_INSTRUCTED_DATE_FIELD;
-  const flagField = channel === 'sales' ? 'is_sales' : 'is_lettings';
-
-  return properties.filter(p =>
-    belongsToBranch(p, branchId) &&
-    truthy(p, flagField) &&
-    inRange(p, dateField, start, end)
-  ).length;
+  return filterInstructedProperties(properties, branchId, channel, start, end).length;
 }
 
 export function filterInstructedProperties(
@@ -130,47 +131,51 @@ export function filterInstructedProperties(
   start: Date,
   end: Date
 ): StreetRecord[] {
-  const dateField = channel === 'sales'
-    ? cfg.PROPERTY_SALES_INSTRUCTED_DATE_FIELD
-    : cfg.PROPERTY_LETTINGS_INSTRUCTED_DATE_FIELD;
+  const dateFields = channel === 'sales'
+    ? cfg.PROPERTY_SALES_INSTRUCTED_DATE_FIELDS
+    : cfg.PROPERTY_LETTINGS_INSTRUCTED_DATE_FIELDS;
   const flagField = channel === 'sales' ? 'is_sales' : 'is_lettings';
 
-  return properties.filter(p =>
-    belongsToBranch(p, branchId) &&
-    truthy(p, flagField) &&
-    inRange(p, dateField, start, end)
-  );
+  return properties.filter(p => {
+    if (!belongsToBranch(p, branchId)) return false;
+    const status = (getField(p, 'status') || '').toString().toLowerCase();
+    const isChannel = truthy(p, flagField) || (channel === 'sales' ? status.includes('sale') : status.includes('let'));
+    if (!isChannel) return false;
+    if (status.includes('valuation cancelled')) return false;
+    return inRange(p, dateFields, start, end);
+  });
 }
 
 // ---------------------------------------------------------------------------
 // Sales
 // ---------------------------------------------------------------------------
 
-export function filterSalesByStatus(
-  sales: StreetRecord[],
-  branchId: string | null,
-  status: string,
-  dateField: string,
-  start: Date,
-  end: Date
-): StreetRecord[] {
-  return sales.filter(s =>
-    belongsToBranch(s, branchId) &&
-    statusIs(s, 'status', status) &&
-    inRange(s, dateField, start, end)
-  );
-}
-
 export function countPropertiesSold(sales: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
-  return filterSalesByStatus(sales, branchId, cfg.SOLD_STATUS, cfg.SOLD_DATE_FIELD, start, end).length;
+  return sales.filter(s => {
+    if (!belongsToBranch(s, branchId)) return false;
+    const status = (getField(s, 'status') || '').toString().toLowerCase();
+    if (!status.includes('completed')) return false;
+    return inRange(s, cfg.SOLD_DATE_FIELDS, start, end);
+  }).length;
 }
 
 export function countSalesAgreed(sales: StreetRecord[], branchId: string | null, start: Date, end: Date): StreetRecord[] {
-  return filterSalesByStatus(sales, branchId, cfg.SALES_AGREED_STATUS, cfg.SALES_AGREED_DATE_FIELD, start, end);
+  return sales.filter(s => {
+    if (!belongsToBranch(s, branchId)) return false;
+    const status = (getField(s, 'status') || '').toString().toLowerCase();
+    const isAgreed = status.includes('offer accepted') || status.includes('exchanged') || status.includes('completed');
+    if (!isAgreed) return false;
+    return inRange(s, cfg.SALES_AGREED_DATE_FIELDS, start, end);
+  });
 }
 
 export function countFallThroughs(sales: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
-  return filterSalesByStatus(sales, branchId, cfg.FALL_THROUGH_STATUS, cfg.FALL_THROUGH_DATE_FIELD, start, end).length;
+  return sales.filter(s => {
+    if (!belongsToBranch(s, branchId)) return false;
+    const status = (getField(s, 'status') || '').toString().toLowerCase();
+    if (!status.includes('fall')) return false;
+    return inRange(s, cfg.FALL_THROUGH_DATE_FIELDS, start, end);
+  }).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +185,7 @@ export function countFallThroughs(sales: StreetRecord[], branchId: string | null
 export function filterTenanciesLet(tenancies: StreetRecord[], branchId: string | null, start: Date, end: Date): StreetRecord[] {
   return tenancies.filter(t =>
     belongsToBranch(t, branchId) &&
-    inRange(t, cfg.TENANCY_LET_DATE_FIELD, start, end)
+    inRange(t, cfg.TENANCY_LET_DATE_FIELDS, start, end)
   );
 }
 
@@ -189,20 +194,23 @@ export function countPropertiesLet(tenancies: StreetRecord[], branchId: string |
 }
 
 export function countPropertiesLost(tenancies: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
-  return tenancies.filter(t =>
-    belongsToBranch(t, branchId) &&
-    statusIs(t, 'status', cfg.LOST_STATUS) &&
-    inRange(t, cfg.LOST_DATE_FIELD, start, end)
-  ).length;
+  return tenancies.filter(t => {
+    if (!belongsToBranch(t, branchId)) return false;
+    const status = (getField(t, 'status') || '').toString().toLowerCase();
+    const isLost = status.includes('ended') || status.includes('lost');
+    if (!isLost) return false;
+    return inRange(t, cfg.LOST_DATE_FIELDS, start, end);
+  }).length;
 }
 
 /** Live snapshot — not date-ranged, since it's a point-in-time count. */
 export function countFullyManagedProperties(tenancies: StreetRecord[], branchId: string | null): number {
-  return tenancies.filter(t =>
-    belongsToBranch(t, branchId) &&
-    truthy(t, 'active') &&
-    statusIs(t, 'service_level', cfg.SERVICE_LEVEL_FULLY_MANAGED)
-  ).length;
+  return tenancies.filter(t => {
+    if (!belongsToBranch(t, branchId)) return false;
+    if (!truthy(t, 'active')) return false;
+    const level = (getField(t, 'service_level') || '').toString().toLowerCase();
+    return level.includes('manage');
+  }).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,11 +218,12 @@ export function countFullyManagedProperties(tenancies: StreetRecord[], branchId:
 // ---------------------------------------------------------------------------
 
 export function countViewingsAttended(viewings: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
-  return viewings.filter(v =>
-    belongsToBranch(v, branchId) &&
-    statusIs(v, 'status', cfg.VIEWING_ATTENDED_STATUS) &&
-    inRange(v, cfg.VIEWING_DATE_FIELD, start, end)
-  ).length;
+  return viewings.filter(v => {
+    if (!belongsToBranch(v, branchId)) return false;
+    const status = (getField(v, 'status') || '').toString().toLowerCase();
+    if (status.includes('cancelled')) return false;
+    return inRange(v, cfg.VIEWING_DATE_FIELDS, start, end);
+  }).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +231,7 @@ export function countViewingsAttended(viewings: StreetRecord[], branchId: string
 // ---------------------------------------------------------------------------
 
 function looksLikeApplicant(record: StreetRecord): boolean {
+  if (record['applicants_ids'] || record['applicants_id']) return true;
   const keys = Object.keys(record);
   if (keys.some(k => k.toLowerCase().includes('applicant'))) return true;
   const roleOrType = (record['role'] || record['type'] || '').toString().toLowerCase();
@@ -251,8 +261,8 @@ export function countPropertiesWithdrawn(
     if (!belongsToBranch(p, branchId)) return false;
     const status = (getField(p, 'status') || '').toString().toLowerCase();
     const isWithdrawn = status.includes('withdrawn') || status.includes('dis-instructed') || status.includes('cancelled');
-    if (!isWithdrawn) return false;
-    const date = parseDateField(p, 'status_updated_at') || parseDateField(p, 'updated_at') || parseDateField(p, 'created_at');
+    if (!isWithdrawn || status.includes('valuation cancelled')) return false;
+    const date = parseDateField(p, ['status_updated_at', 'updated_at', 'created_at']);
     return date ? date >= start && date <= end : false;
   }).length;
 }
@@ -261,9 +271,16 @@ export function countPropertiesWithdrawn(
 export function countActiveForSale(properties: StreetRecord[], branchId: string | null): number {
   return properties.filter(p => {
     if (!belongsToBranch(p, branchId)) return false;
-    if (!truthy(p, 'is_sales')) return false;
+    const isSales = truthy(p, 'is_sales') || (getField(p, 'status') || '').toString().toLowerCase().includes('sale');
+    if (!isSales) return false;
     const status = (getField(p, 'status') || '').toString().toLowerCase();
-    return status.includes('for sale') || status.includes('instructed') || status.includes('under offer') || status === 'available';
+    return (
+      status.includes('for sale') ||
+      status.includes('instructed') ||
+      status.includes('under offer') ||
+      status.includes('sold stc') ||
+      status === 'available'
+    );
   }).length;
 }
 
@@ -286,7 +303,7 @@ export function calculateMonthlySalesCommission(
   let total = 0;
   for (const s of sales) {
     if (!belongsToBranch(s, branchId)) continue;
-    const date = parseDateField(s, 'dates.offer_accepted_date') || parseDateField(s, 'created_at') || parseDateField(s, 'status_updated_at');
+    const date = parseDateField(s, ['dates.offer_accepted_date', 'created_at', 'status_updated_at']);
     if (date && date >= start && date <= end) {
       const fee = Number(getField(s, 'fee_amount') || getField(s, 'fee') || 0);
       if (fee > 0) {
@@ -307,7 +324,7 @@ export function countCompletions(sales: StreetRecord[], branchId: string | null,
     if (!belongsToBranch(s, branchId)) return false;
     const status = (getField(s, 'status') || '').toString().toLowerCase();
     if (!status.includes('completed')) return false;
-    const date = parseDateField(s, 'dates.completed_date') || parseDateField(s, 'status_updated_at') || parseDateField(s, 'updated_at');
+    const date = parseDateField(s, ['dates.completed_date', 'status_updated_at', 'updated_at']);
     return date ? date >= start && date <= end : false;
   }).length;
 }
@@ -316,7 +333,7 @@ export function countCompletions(sales: StreetRecord[], branchId: string | null,
 export function countViewingsBooked(viewings: StreetRecord[], branchId: string | null, start: Date, end: Date): number {
   return viewings.filter(v =>
     belongsToBranch(v, branchId) &&
-    inRange(v, cfg.VIEWING_DATE_FIELD, start, end)
+    inRange(v, cfg.VIEWING_DATE_FIELDS, start, end)
   ).length;
 }
 
@@ -325,7 +342,7 @@ export function countViewingsCancelled(viewings: StreetRecord[], branchId: strin
   return viewings.filter(v => {
     if (!belongsToBranch(v, branchId)) return false;
     const status = (getField(v, 'status') || '').toString().toLowerCase();
-    return status.includes('cancelled') && inRange(v, cfg.VIEWING_DATE_FIELD, start, end);
+    return status.includes('cancelled') && inRange(v, cfg.VIEWING_DATE_FIELDS, start, end);
   }).length;
 }
 
@@ -333,7 +350,8 @@ export function countViewingsCancelled(viewings: StreetRecord[], branchId: strin
 export function countAvailableRentals(properties: StreetRecord[], branchId: string | null): number {
   return properties.filter(p => {
     if (!belongsToBranch(p, branchId)) return false;
-    if (!truthy(p, 'is_lettings')) return false;
+    const isLet = truthy(p, 'is_lettings') || (getField(p, 'status') || '').toString().toLowerCase().includes('to let');
+    if (!isLet) return false;
     const status = (getField(p, 'status') || '').toString().toLowerCase();
     return status.includes('to let') || status.includes('instructed') || status === 'available';
   }).length;
