@@ -6,8 +6,8 @@ export interface StreetRecord {
 }
 
 export class StreetClient {
-  private client: AxiosInstance;
-  private baseUrl: string;
+  public client: AxiosInstance;
+  public baseUrl: string;
 
   constructor() {
     const config = getConfig();

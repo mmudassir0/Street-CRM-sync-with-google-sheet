@@ -119,7 +119,7 @@ export class BranchReportBuilder {
     // Clear existing tab contents
     await this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.spreadsheetId,
-      range: `'${tabName}'!A1:Z150`,
+      range: `'${tabName}'!A1:Z300`,
     });
 
     const rows: any[][] = [];
@@ -179,7 +179,7 @@ export class BranchReportBuilder {
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['MARKET VALUATIONS']);
+    rows.push(['MARKET VALUATIONS (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Value (£)', 'Property Type', 'Status']);
@@ -188,12 +188,12 @@ export class BranchReportBuilder {
         rows.push([v.address, v.priceOrValue, v.typeOrService, v.statusOrFee]);
       }
     } else {
-      rows.push(['No valuations recorded for this period', '', '', '']);
+      rows.push(['No valuations recorded for this month', '', '', '']);
     }
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['PROPERTY INSTRUCTIONS']);
+    rows.push(['PROPERTY INSTRUCTIONS (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Asking Price (£)', 'Property Type', 'Fee (%/£)']);
@@ -202,12 +202,12 @@ export class BranchReportBuilder {
         rows.push([inst.address, inst.priceOrValue, inst.typeOrService, inst.statusOrFee]);
       }
     } else {
-      rows.push(['No new instructions recorded for this period', '', '', '']);
+      rows.push(['No new instructions recorded for this month', '', '', '']);
     }
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['SALES AGREED']);
+    rows.push(['SALES AGREED (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Agreed Price (£)', 'Fee (£)', 'Fee (%)']);
@@ -216,7 +216,7 @@ export class BranchReportBuilder {
         rows.push([sa.address, sa.priceOrValue, sa.typeOrService, sa.statusOrFee]);
       }
     } else {
-      rows.push(['No sales agreed recorded for this period', '', '', '']);
+      rows.push(['No sales agreed recorded for this month', '', '', '']);
     }
 
     // Write all values
@@ -249,7 +249,7 @@ export class BranchReportBuilder {
     // Clear existing tab contents
     await this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.spreadsheetId,
-      range: `'${tabName}'!A1:Z150`,
+      range: `'${tabName}'!A1:Z300`,
     });
 
     const rows: any[][] = [];
@@ -320,7 +320,7 @@ export class BranchReportBuilder {
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['MARKET VALUATIONS']);
+    rows.push(['MARKET VALUATIONS (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Valuation Address', 'Rent PCM (£)', 'Property Type', 'Status']);
@@ -329,12 +329,12 @@ export class BranchReportBuilder {
         rows.push([v.address, v.priceOrValue, v.typeOrService, v.statusOrFee]);
       }
     } else {
-      rows.push(['No valuations recorded for this period', '', '', '']);
+      rows.push(['No valuations recorded for this month', '', '', '']);
     }
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['NEW PROPERTY INSTRUCTIONS']);
+    rows.push(['NEW PROPERTY INSTRUCTIONS (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Service Type', 'Monthly Fee (%/£)', 'Setup Fee (£)']);
@@ -343,12 +343,12 @@ export class BranchReportBuilder {
         rows.push([inst.address, inst.priceOrValue, inst.typeOrService, inst.statusOrFee]);
       }
     } else {
-      rows.push(['No new instructions recorded for this period', '', '', '']);
+      rows.push(['No new instructions recorded for this month', '', '', '']);
     }
 
     rows.push([]);
     headingRowIndices.push(rows.length);
-    rows.push(['LET AGREED']);
+    rows.push(['LET AGREED (MTD)']);
 
     tableHeaderRowIndices.push(rows.length);
     rows.push(['Address', 'Service Type', 'Monthly Fee (%/£)', 'Setup Fee (£)']);
@@ -357,7 +357,7 @@ export class BranchReportBuilder {
         rows.push([la.address, la.priceOrValue, la.typeOrService, la.statusOrFee]);
       }
     } else {
-      rows.push(['No let agreed recorded for this period', '', '', '']);
+      rows.push(['No let agreed recorded for this month', '', '', '']);
     }
 
     // Write all values
@@ -390,7 +390,7 @@ export class BranchReportBuilder {
             range: {
               sheetId,
               startRowIndex: 0,
-              endRowIndex: 150,
+              endRowIndex: 300,
               startColumnIndex: 0,
               endColumnIndex: 10,
             },

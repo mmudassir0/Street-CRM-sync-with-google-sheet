@@ -14,9 +14,10 @@ export interface Config {
 }
 
 export function getConfig(): Config {
-  const streetApiKey = process.env.STREET_API_KEY || '';
-  const streetBaseUrl = (process.env.STREET_API_BASE_URL || 'https://street.co.uk/open-api/v1').replace(/\/+$/, '');
-  const googleSheetId = process.env.GOOGLE_SHEET_ID || '';
+  const streetApiKey = (process.env.STREET_API_KEY || '').trim().replace(/^['"`]+|['"`]+$/g, '');
+  const rawBaseUrl = (process.env.STREET_API_BASE_URL || 'https://street.co.uk/open-api/v1').trim().replace(/^['"`]+|['"`]+$/g, '');
+  const streetBaseUrl = rawBaseUrl.replace(/\/+$/, '');
+  const googleSheetId = (process.env.GOOGLE_SHEET_ID || '').trim().replace(/^['"`]+|['"`]+$/g, '');
   
   const rawObjects = process.env.STREET_OBJECTS || 'properties,viewings,valuations,sales,tenancies,people';
   const streetObjects = rawObjects
